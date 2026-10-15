@@ -1,6 +1,6 @@
 # Circle CCTP Bridge
 
-A single-file web page that moves **USDC, EURC, cirBTC and WETH** between **Arc, Ethereum and Avalanche** through Circle's own contracts:
+A browser page that moves **USDC, EURC, cirBTC and WETH** between **Arc, Ethereum and Avalanche** through Circle's own contracts:
 
 - **USDC** goes through Circle **CCTP V2** (`depositForBurn`, then `receiveMessage` on the destination).
 - **EURC, cirBTC and WETH** go through Circle's cross-chain token service, also called "CCTP for non-USDC" or CCTPx (`crossChainTransfer` on `CrossChainTokenService`).
@@ -15,17 +15,17 @@ Background: [How to live off a crypto loan, chapter 2.10](https://liberation.tra
 
 ## Routes
 
-| Route | Protocol | Typical time |
-|---|---|---|
-| USDC: Avalanche → Arc | CCTP V2 | seconds |
-| USDC: Avalanche → Ethereum | CCTP V2 | seconds |
-| USDC: Ethereum → Arc | CCTP V2 | ~15–20 min standard, or seconds with "fast" (small fee) |
-| USDC: Arc → Ethereum | CCTP V2 | seconds |
-| EURC: Arc → Ethereum | CCTPx | seconds to minutes |
-| cirBTC: Ethereum → Arc | CCTPx | ~15–20 min standard, or faster with "fast" |
-| cirBTC: Arc → Ethereum | CCTPx | seconds to minutes |
-| WETH: Ethereum → Arc | CCTPx (with optional ETH → WETH wrap) | ~15–20 min standard, or faster with "fast" |
-| WETH: Arc → Ethereum | CCTPx | seconds to minutes |
+| Route                      | Protocol                              | Typical time                                            |
+| -------------------------- | ------------------------------------- | ------------------------------------------------------- |
+| USDC: Avalanche → Arc      | CCTP V2                               | seconds                                                 |
+| USDC: Avalanche → Ethereum | CCTP V2                               | seconds                                                 |
+| USDC: Ethereum → Arc       | CCTP V2                               | ~15–20 min standard, or seconds with "fast" (small fee) |
+| USDC: Arc → Ethereum       | CCTP V2                               | seconds                                                 |
+| EURC: Arc → Ethereum       | CCTPx                                 | seconds to minutes                                      |
+| cirBTC: Ethereum → Arc     | CCTPx                                 | ~15–20 min standard, or faster with "fast"              |
+| cirBTC: Arc → Ethereum     | CCTPx                                 | seconds to minutes                                      |
+| WETH: Ethereum → Arc       | CCTPx (with optional ETH → WETH wrap) | ~15–20 min standard, or faster with "fast"              |
+| WETH: Arc → Ethereum       | CCTPx                                 | seconds to minutes                                      |
 
 The time is mostly Circle's attestation. Transfers that start on Ethereum wait for Ethereum finality unless you choose "fast".
 
@@ -40,6 +40,13 @@ python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
 Then open <http://127.0.0.1:8000> in a browser with **Rabby** or **MetaMask**. Ideally use a hardware wallet as the signer.
+
+The safety checks have a Bun test suite. Install and run them with Bun:
+
+```bash
+bun install
+bun test
+```
 
 ## How a transfer works
 
@@ -58,7 +65,7 @@ For EURC, cirBTC and WETH you can instead untick "I sign the mint myself". Circl
 - **On-chain contract checks before every transfer.** For USDC it checks `TokenMessengerV2.localMinter()`. For the other tokens it checks `CrossChainTokenService.resolveTokenManager()` and `resolveTokenAddress()` against the addresses in the code.
 - **Recipient allowlist.** The recipient is either the connected wallet or an address from your own address book, which is stored only in your browser. There is no free-text recipient field, which protects against address poisoning (look-alike addresses planted in your transaction history).
 - **Address book hardening.**
-  - Entries are re-validated every time the page loads.
+  - Entries are re-validated every time the page loads. `validEntry` returns either `{ ok: true, entry }` or `{ ok: false, error }`. The page keeps an entry only when `ok` is true, and shows `error` when an add fails. A bad saved entry is dropped and counted in the log.
   - Labels are plain words only, so a label cannot pretend to be an address or "This wallet".
   - Token and Circle contract addresses are refused as recipients.
 - **Extra confirmation for other addresses.** Before funds go to an address other than the connected wallet, the page shows the full address in a confirmation dialog. It also warns if that address is a smart contract on the destination network.
@@ -69,7 +76,7 @@ For EURC, cirBTC and WETH you can instead untick "I sign the mint myself". Circl
   - For EURC, cirBTC and WETH the page fetches a fresh quote right before sending. It refuses a fee that jumped by more than 50%, and asks for confirmation above a small threshold.
   - Each quote is used only once.
 - **Safe resume.** "Finish a pending transfer" checks with Circle that the transfer really goes from and to the networks of the selected route before switching networks. It stops after 2 minutes if Circle does not know the hash.
-- **Gas reserve on Arc.** USDC is the gas token on Arc, so 1 USDC always stays behind. This is checked again right before sending.
+- **Balance check.** Get fee and Send both refuse when the token balance cannot cover the amount. On Arc USDC, Send keeps at least 0.5 USDC for gas. MAX and the amount filled in on connect leave 1 USDC.
 - **Strict Content-Security-Policy.**
   - No inline scripts.
   - Scripts load only from this folder and the pinned library.
@@ -96,21 +103,21 @@ Circle applies per-transfer limits, for example at most 9 cirBTC per transfer at
 
 The Circle contracts have the same address on Ethereum, Arc and Avalanche:
 
-| Contract | Address |
-|---|---|
+| Contract                | Address                                      |
+| ----------------------- | -------------------------------------------- |
 | TokenMessengerV2 (USDC) | `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d` |
-| TokenMinterV2 | `0xfd78EE919681417d192449715b2594ab58f5D002` |
-| MessageTransmitterV2 | `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` |
-| CrossChainTokenService | `0x431871229103b780868f8C6BB820cd16ECf942BC` |
+| TokenMinterV2           | `0xfd78EE919681417d192449715b2594ab58f5D002` |
+| MessageTransmitterV2    | `0x81D40F21F12A8F0E3252Bccb954D722d4c464B64` |
+| CrossChainTokenService  | `0x431871229103b780868f8C6BB820cd16ECf942BC` |
 
 Tokens:
 
-| Token | Ethereum | Arc | Avalanche |
-|---|---|---|---|
-| USDC | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | `0x3600000000000000000000000000000000000000` (ERC-20 interface of native USDC) | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` (native, not USDC.e) |
-| EURC | `0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c` | `0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1` | – |
-| cirBTC | `0x72DFB2E44f59C5AD2bAFE84314E5b99a7cd5075E` | `0x171A4217b86A807A64eB94757Db6849fb4bDbAA0` | – |
-| WETH | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | `0x128cC466B61f542da60c70e3aA11c10e19B84EDB` | – |
+| Token  | Ethereum                                     | Arc                                                                            | Avalanche                                                         |
+| ------ | -------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| USDC   | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | `0x3600000000000000000000000000000000000000` (ERC-20 interface of native USDC) | `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E` (native, not USDC.e) |
+| EURC   | `0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c` | `0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1`                                   | –                                                                 |
+| cirBTC | `0x72DFB2E44f59C5AD2bAFE84314E5b99a7cd5075E` | `0x171A4217b86A807A64eB94757Db6849fb4bDbAA0`                                   | –                                                                 |
+| WETH   | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | `0x128cC466B61f542da60c70e3aA11c10e19B84EDB`                                   | –                                                                 |
 
 Fake cirBTC tokens circulate on Arc, so compare the address before you trade or bridge.
 
@@ -127,12 +134,13 @@ Official references: [Circle CCTP docs](https://developers.circle.com/cctp), [CC
 ## Files
 
 - `index.html`: the page with its Content-Security-Policy.
-- `app.js`: all the logic.
+- `app.js`: the page.
+- `logic.mjs`: the safety checks, also covered by `bun test`.
 - `style.css`: the styles.
 
 ## Adding a route
 
-Routes live in the `ROUTES` object in `app.js`. A USDC route needs only the two chains (`usdcRoute(src, dst, defaultFast)`). A CCTPx route needs the token's `tokenId`, its TokenManager and the token addresses on both chains. You can list the token IDs from Circle's API (`GET https://iris-api.circle.com/v2/cctpx/tokens`). Check every new route with a small amount first.
+Routes live in the `ROUTES` object in `logic.mjs`. The dropdown is built from that object. A USDC route needs only the two chains (`usdcRoute(src, dst, defaultFast)`). A CCTPx route needs the token's `tokenId`, its TokenManager and the token addresses on both chains. You can list the token IDs from Circle's API (`GET https://iris-api.circle.com/v2/cctpx/tokens`). A new chain also needs an entry in `CHAINS`, including its Circle domain and fee-confirmation threshold, and its RPC host in the `connect-src` of the Content-Security-Policy in `index.html`. A route that names an unknown chain fails when the page loads. Check every new route with a small amount first.
 
 ## Reporting a security issue
 

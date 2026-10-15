@@ -1,72 +1,125 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; connect-src https://iris-api.circle.com https://ethereum-rpc.publicnode.com https://rpc.mainnet.arc.io https://api.avax.network; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
-<meta name="referrer" content="no-referrer">
-<title>Circle CCTP Bridge</title>
-<link rel="stylesheet" href="style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"
-        integrity="sha512-f+t6//rz3Iy3hp1CiwtsigYtyWuGk7bf6xl2RTOPvmyMIfTQJ4iy6Lg1dah1bsLQ9SLideJGicgmOkBsBXP1aA=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="app.js" defer></script>
-</head>
-<body>
-<h1>Circle CCTP Bridge</h1>
-<p class="sub">Move USDC, EURC, cirBTC and WETH between Arc, Ethereum and Avalanche through Circle's own contracts. Circle charges no protocol fee for standard transfers. You pay only gas.</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; connect-src https://iris-api.circle.com https://ethereum-rpc.publicnode.com https://rpc.mainnet.arc.io https://api.avax.network; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>Circle CCTP Bridge</title>
+    <link rel="stylesheet" href="style.css" />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"
+      integrity="sha512-f+t6//rz3Iy3hp1CiwtsigYtyWuGk7bf6xl2RTOPvmyMIfTQJ4iy6Lg1dah1bsLQ9SLideJGicgmOkBsBXP1aA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script src="app.js" type="module"></script>
+  </head>
+  <body>
+    <h1>Circle CCTP Bridge</h1>
+    <p class="sub">
+      Move USDC, EURC, cirBTC and WETH between Arc, Ethereum and Avalanche
+      through Circle's own contracts. Circle charges no protocol fee for
+      standard transfers. You pay only gas.
+    </p>
 
-<div class="card">
-  <div class="row">
-    Route:
-    <select id="route">
-      <option value="usdc_av_arc">USDC: Avalanche → Arc</option>
-      <option value="usdc_av_eth">USDC: Avalanche → Ethereum</option>
-      <option value="usdc_eth_arc">USDC: Ethereum → Arc</option>
-      <option value="usdc_arc_eth">USDC: Arc → Ethereum</option>
-      <option value="eurc_arc_eth">EURC: Arc → Ethereum</option>
-      <option value="cirbtc_eth_arc">cirBTC: Ethereum → Arc</option>
-      <option value="cirbtc_arc_eth">cirBTC: Arc → Ethereum</option>
-      <option value="weth_eth_arc">WETH: Ethereum → Arc</option>
-      <option value="weth_arc_eth">WETH: Arc → Ethereum</option>
-    </select>
-  </div>
-  <div class="row muted" id="routeInfo"></div>
-  <div class="row">Recipient on the destination network:<br>
-    <select id="rcpt"></select>
-    <div class="row muted" id="rcptInfo"></div>
-  </div>
-  <details class="row">
-    <summary>My other addresses (address book)</summary>
-    <p class="warn">Add only addresses you control. Copy them from your hardware wallet or your wallet's address book, never from a transaction history: scammers plant look-alike addresses there (address poisoning). Smart contract wallets (for example a Safe) can have a different address, or no deployment at all, on another network.</p>
-    <input id="abAddr" type="text" placeholder="0x…" autocomplete="off" spellcheck="false">
-    <div class="row"><input id="abLabel" type="text" placeholder="Label, e.g. Ledger 2" maxlength="24" autocomplete="off"> <button id="abAdd" class="small">Add</button></div>
-    <div id="abList"></div>
-    <p class="muted">The address book is stored only in this browser (localStorage).</p>
-  </details>
-  <div class="row"><label><input id="fast" type="checkbox"> Fast transfer (only from Ethereum, small fee)</label></div>
-  <div class="row"><label><input id="selfMint" type="checkbox"> I sign the mint on the destination network myself (no forwarding fee, needs a little gas there)</label></div>
-</div>
+    <div class="card">
+      <div class="row">
+        Route:
+        <select id="route"></select>
+      </div>
+      <div class="row muted" id="routeInfo"></div>
+      <div class="row">
+        Recipient on the destination network:<br />
+        <select id="rcpt"></select>
+        <div class="row muted" id="rcptInfo"></div>
+      </div>
+      <details class="row">
+        <summary>My other addresses (address book)</summary>
+        <p class="warn">
+          Add only addresses you control. Copy them from your hardware wallet or
+          your wallet's address book, never from a transaction history: scammers
+          plant look-alike addresses there (address poisoning). Smart contract
+          wallets (for example a Safe) can have a different address, or no
+          deployment at all, on another network.
+        </p>
+        <input
+          id="abAddr"
+          type="text"
+          placeholder="0x…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="row">
+          <input
+            id="abLabel"
+            type="text"
+            placeholder="Label, e.g. Ledger 2"
+            maxlength="24"
+            autocomplete="off"
+          />
+          <button id="abAdd" class="small">Add</button>
+        </div>
+        <div id="abList"></div>
+        <p class="muted">
+          The address book is stored only in this browser (localStorage).
+        </p>
+      </details>
+      <div class="row">
+        <label>
+          <input id="fast" type="checkbox" />
+          <span id="fastLabel"></span>
+        </label>
+      </div>
+      <div class="row">
+        <label
+          ><input id="selfMint" type="checkbox" /> I sign the mint on the
+          destination network myself (no forwarding fee, needs a little gas
+          there)</label
+        >
+      </div>
+    </div>
 
-<div class="card">
-  <button id="connect">1. Connect wallet</button>
-  <div class="row" id="acct"></div>
-  <div class="row">Amount: <input id="amt" type="text" size="18" autocomplete="off"> <span id="sym"></span> <button id="max" class="small">MAX</button></div>
-  <button id="wrap" disabled>Wrap ETH → WETH (entered amount)</button>
-  <button id="quote" disabled>2. Get fee</button>
-  <button id="approve" disabled>3. Approve</button>
-  <button id="send" disabled>4. Send</button>
-</div>
+    <div class="card">
+      <button id="connect">1. Connect wallet</button>
+      <div class="row" id="acct"></div>
+      <div class="row">
+        Amount: <input id="amt" type="text" size="18" autocomplete="off" />
+        <span id="sym"></span> <button id="max" class="small">MAX</button>
+      </div>
+      <button id="wrap" disabled>Wrap ETH → WETH (entered amount)</button>
+      <button id="quote" disabled>2. Get fee</button>
+      <button id="approve" disabled>3. Approve</button>
+      <button id="send" disabled>4. Send</button>
+    </div>
 
-<div class="card">
-  <h2>Finish a pending transfer</h2>
-  <p class="muted">If you closed this page before the mint on the destination network, pick the same route above, connect your wallet and paste the hash of the transfer transaction on the source network.</p>
-  <input id="resumeHash" type="text" placeholder="0x… transaction hash on the source network" autocomplete="off" spellcheck="false">
-  <div class="row"><button id="resume" disabled>Finish mint</button></div>
-</div>
+    <div class="card">
+      <h2>Finish a pending transfer</h2>
+      <p class="muted">
+        If you closed this page before the mint on the destination network, pick
+        the same route above, connect your wallet and paste the hash of the
+        transfer transaction on the source network.
+      </p>
+      <input
+        id="resumeHash"
+        type="text"
+        placeholder="0x… transaction hash on the source network"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="row"><button id="resume" disabled>Finish mint</button></div>
+    </div>
 
-<div class="card"><div id="log"></div></div>
+    <div class="card"><div id="log"></div></div>
 
-<p class="muted">⚠️ Unaudited personal tool, provided as is. Use it entirely at your own risk. The authors accept no liability for any loss of funds, bugs, misuse or abuse. You are responsible for every transaction you sign. Test with a small amount first. Docs: README.md.</p>
-</body>
+    <p class="muted">
+      ⚠️ Unaudited personal tool, provided as is. Use it entirely at your own
+      risk. The authors accept no liability for any loss of funds, bugs, misuse
+      or abuse. You are responsible for every transaction you sign. Test with a
+      small amount first. Docs: README.md.
+    </p>
+  </body>
 </html>

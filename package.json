@@ -1,0 +1,11 @@
+{
+  "name": "circle-cctp-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "ethers": "6.13.2"
+  }
+}

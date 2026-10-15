@@ -1,4 +1,8 @@
-"use strict";
+import {
+  CCTS, CHAINS, MESSAGE_TRANSMITTER, ROUTES, TOKEN_MESSENGER_V2, TOKEN_MINTER_V2,
+  WRAP_MAX_RESERVE, WRAP_MIN_LEFT, cctpxFeeJumped, feeNeedsConfirm, finality,
+  fastAllowed, fastLabel, maxFillNote, maxFillReserve, maxFillSuffix, quoteStillMatches, routeLabel, selfMintLocked, spendError, transferMode, usdcMaxFee, validEntry,
+} from "./logic.mjs";
 
 // Refuse to run inside a frame (clickjacking protection when the page is hosted somewhere).
 if (window.top !== window.self) {
@@ -7,73 +11,7 @@ if (window.top !== window.self) {
 }
 
 const { ethers } = window;
-
-// Circle contracts (same address on Ethereum, Arc and Avalanche), see developers.circle.com
-const CCTS = "0x431871229103b780868f8C6BB820cd16ECf942BC";               // CrossChainTokenService (non-USDC tokens)
-const TOKEN_MESSENGER_V2 = "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d"; // CCTP V2 for USDC
-const TOKEN_MINTER_V2 = "0xfd78EE919681417d192449715b2594ab58f5D002";
-const MESSAGE_TRANSMITTER = "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64";
 const IRIS = "https://iris-api.circle.com";
-
-const USDC_GAS_RESERVE = 1_000000n;   // on Arc USDC is also the gas token, so 1 USDC always stays behind
-const usdcReserve = (r) => (r.src.chainId === 5042 ? USDC_GAS_RESERVE : 0n);
-const MAX_USDC_FEE_BPS = 20;           // refuse if Circle ever asks more than 0.2 % for a USDC transfer
-// Above these fees (in the source chain's gas token, 18 decimals everywhere) the page asks for confirmation.
-const FEE_CONFIRM = { 1: ethers.parseEther("0.003"), 5042: ethers.parseEther("3"), 43114: ethers.parseEther("0.2") };
-
-const CHAINS = {
-  1: { name: "Ethereum", hex: "0x1", rpc: "https://ethereum-rpc.publicnode.com", native: "ETH", explorer: "https://etherscan.io/tx/" },
-  5042: { name: "Arc", hex: "0x13b2", rpc: "https://rpc.mainnet.arc.io", native: "USDC", explorer: "https://explorer.arc.io/tx/",
-          add: { chainId: "0x13b2", chainName: "Arc", rpcUrls: ["https://rpc.mainnet.arc.io"],
-                 nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 }, blockExplorerUrls: ["https://explorer.arc.io"] } },
-  43114: { name: "Avalanche", hex: "0xa86a", rpc: "https://api.avax.network/ext/bc/C/rpc", native: "AVAX", explorer: "https://snowtrace.io/tx/",
-          add: { chainId: "0xa86a", chainName: "Avalanche C-Chain", rpcUrls: ["https://api.avax.network/ext/bc/C/rpc"],
-                 nativeCurrency: { name: "AVAX", symbol: "AVAX", decimals: 18 }, blockExplorerUrls: ["https://snowtrace.io"] } },
-};
-
-const USDC = {
-  1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  5042: "0x3600000000000000000000000000000000000000",   // ERC-20 interface of native USDC on Arc
-  43114: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",  // native USDC, not the bridged USDC.e
-};
-const DOMAIN = { 1: 0, 43114: 1, 5042: 26 };
-const usdcRoute = (src, dst, defaultFast) => ({
-  kind: "usdc", symbol: "USDC", decimals: 6,
-  src: { chainId: src, domain: DOMAIN[src], token: USDC[src] },
-  dst: { chainId: dst, domain: DOMAIN[dst], token: USDC[dst] },
-  tokenManager: TOKEN_MESSENGER_V2,   // spender for approve
-  defaultFast, defaultSelfMint: true,
-});
-
-const WETH = { tokenId: "0x5c2cf12eccf48ab63313169ce192dc00af7c37a58bbc546ba4becf54df4962ea", manager: "0x8b86d0a92d779bbcc3208a98df0ab1926b3ac4dd",
-               1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", 5042: "0x128cC466B61f542da60c70e3aA11c10e19B84EDB" };
-const CIRBTC = { tokenId: "0x3d26699fb5d40190fc3fa0dcbc1cd24e558355043c1997572ff9fd6efbb3fdca", manager: "0xa1db0fda2d1bfebe2e5701fe73b252bc2b25700e",
-                 1: "0x72DFB2E44f59C5AD2bAFE84314E5b99a7cd5075E", 5042: "0x171A4217b86A807A64eB94757Db6849fb4bDbAA0" };
-const EURC = { tokenId: "0x6ca9e29fa53becc29becaf4a90b9ca7a995ad4d2234880da13ca38c657fb241c", manager: "0x8c27579e24f9f19d96724e19fc059dacd1469e10",
-               1: "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c", 5042: "0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1" };
-const cctpxRoute = (t, symbol, decimals, src, dst, defaultFast) => ({
-  kind: "cctpx", symbol, decimals, tokenId: t.tokenId, tokenManager: t.manager,
-  src: { chainId: src, domain: DOMAIN[src], token: t[src] },
-  dst: { chainId: dst, domain: DOMAIN[dst], token: t[dst] },
-  defaultFast, defaultSelfMint: true,
-});
-
-const ROUTES = {
-  usdc_av_arc: usdcRoute(43114, 5042, false),
-  usdc_av_eth: usdcRoute(43114, 1, false),
-  usdc_eth_arc: usdcRoute(1, 5042, true),
-  usdc_arc_eth: usdcRoute(5042, 1, false),
-  eurc_arc_eth: cctpxRoute(EURC, "EURC", 6, 5042, 1, false),
-  cirbtc_eth_arc: cctpxRoute(CIRBTC, "cirBTC", 8, 1, 5042, true),
-  cirbtc_arc_eth: cctpxRoute(CIRBTC, "cirBTC", 8, 5042, 1, false),
-  weth_eth_arc: { ...cctpxRoute(WETH, "WETH", 18, 1, 5042, true), canWrap: true },
-  weth_arc_eth: cctpxRoute(WETH, "WETH", 18, 5042, 1, false),
-};
-
-// Tokens and Circle contracts must never be a recipient: tokens sent there are lost.
-const NOT_A_RECIPIENT = new Set([CCTS, TOKEN_MESSENGER_V2, TOKEN_MINTER_V2, MESSAGE_TRANSMITTER,
-  ...Object.values(USDC), WETH[1], WETH[5042], CIRBTC[1], CIRBTC[5042], EURC[1], EURC[5042],
-  WETH.manager, CIRBTC.manager, EURC.manager, ethers.ZeroAddress].map((a) => a.toLowerCase()));
 
 const MESSENGER = [
   "function localMinter() view returns (address)",
@@ -90,7 +28,7 @@ const SERVICE = [
   "function crossChainTransfer(bytes32 tokenId, uint256 amount, uint32 destinationDomain, bytes destinationAddress, bytes32 destinationCaller, uint32 minFinalityThreshold, (bytes signedQuote, address refundAddress) claim, bool autoExecuteHookData, bytes hookData) payable",
 ];
 
-let provider, signer, me, quote, quotedFor;
+let provider, signer, me, pending;
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $("log").textContent += m + "\n"; };
 const route = () => ROUTES[$("route").value];
@@ -110,8 +48,9 @@ function applyButtons() {
   for (const id of BUTTONS) $(id).disabled = busy || !want[id];
   for (const id of ["route", "rcpt", "amt", "resumeHash"]) $(id).disabled = busy;
   const r = route();
-  $("selfMint").disabled = busy || r.kind === "usdc";
-  $("fast").disabled = busy || (r.kind === "usdc" && r.src.chainId !== 1);
+  $("selfMint").disabled = busy || selfMintLocked(r);
+  $("fast").disabled = busy || !fastAllowed(r);
+  $("fastLabel").textContent = fastLabel(r);
   for (const b of document.querySelectorAll("#abList button")) b.disabled = busy;
 }
 async function run(fn) {
@@ -122,26 +61,25 @@ async function run(fn) {
 }
 const onClick = (id, fn) => { $(id).onclick = () => run(fn); };
 
+// Get fee stores this snapshot on `pending`, next to the quote body.
+function quoteSelection(r, amount, to) {
+  const { fast, selfMint } = transferMode(r, {
+    fast: $("fast").checked,
+    selfMint: $("selfMint").checked,
+  });
+  return { key: $("route").value, amount, to: to.address, fast, selfMint };
+}
+
 // ---------------------------------------------------------------- address book
 
 const AB_KEY = "circle-cctp-bridge.addressBook";
-// Labels are plain words only, so a label can never imitate an address or "This wallet".
-const cleanLabel = (s) => String(s || "").replace(/[^\p{L}\p{N} ._-]/gu, "").replace(/\s+/g, " ").trim().slice(0, 24);
-const badLabel = (s) => !s || /0x/i.test(s) || /wallet/i.test(s);
 
-function validEntry(e) {
-  try {
-    const address = ethers.getAddress(String(e.address));
-    const label = cleanLabel(e.label);
-    if (badLabel(label) || NOT_A_RECIPIENT.has(address.toLowerCase())) return null;
-    return { label, address };
-  } catch { return null; }
-}
 function loadBook() {
   let raw = [];
   try { raw = JSON.parse(localStorage.getItem(AB_KEY) || "[]"); } catch { raw = []; }
   if (!Array.isArray(raw)) return [];
-  const ok = raw.map(validEntry).filter(Boolean);
+  const parsed = raw.map((e) => validEntry(e, ethers.getAddress));
+  const ok = parsed.filter((e) => e.ok).map((e) => e.entry);
   if (ok.length !== raw.length) log(`Ignored ${raw.length - ok.length} invalid address book entr${raw.length - ok.length === 1 ? "y" : "ies"}.`);
   return ok;
 }
@@ -179,16 +117,14 @@ function showRecipientInfo() {
 
 $("abAdd").onclick = () => {
   if (busy) return;
-  let a;
-  try { a = ethers.getAddress($("abAddr").value.trim()); } catch { log("ERROR: not a valid address (check the checksum)."); return; }
-  if (NOT_A_RECIPIENT.has(a.toLowerCase())) { log("ERROR: this is a token or Circle contract, not a wallet. Tokens sent there are lost."); return; }
-  const label = cleanLabel($("abLabel").value);
-  if (badLabel(label)) { log("ERROR: enter a short label with letters or digits only (no addresses, not \"wallet\")."); return; }
-  if (book.some((e) => e.address.toLowerCase() === a.toLowerCase())) { log("This address is already in the address book."); return; }
-  book.push({ label, address: a }); saveBook(book);
+  const result = validEntry({ label: $("abLabel").value, address: $("abAddr").value.trim() }, ethers.getAddress);
+  if (!result.ok) { log("ERROR: " + result.error); return; }
+  const entry = result.entry;
+  if (book.some((e) => e.address.toLowerCase() === entry.address.toLowerCase())) { log("This address is already in the address book."); return; }
+  book.push(entry); saveBook(book);
   $("abAddr").value = ""; $("abLabel").value = "";
   renderBook(); renderRecipients();
-  log(`Added to the address book: ${label} — ${a}`);
+  log(`Added to the address book: ${entry.label} — ${entry.address}`);
 };
 $("rcpt").onchange = showRecipientInfo;
 
@@ -202,6 +138,17 @@ function recipient() {
 }
 
 // ---------------------------------------------------------------- route UI
+
+function fillRoutes() {
+  const sel = $("route");
+  sel.textContent = "";
+  for (const [key, r] of Object.entries(ROUTES)) {
+    const o = document.createElement("option");
+    o.value = key;
+    o.textContent = routeLabel(r);
+    sel.append(o);
+  }
+}
 
 function showRoute() {
   const r = route();
@@ -217,24 +164,26 @@ function showRoute() {
   };
   line(`${r.symbol} ${CHAINS[r.src.chainId].name} `, { code: r.src.token }, ` → ${CHAINS[r.dst.chainId].name} `, { code: r.dst.token });
   if (usdc) {
+    const gas = maxFillNote(r);
     line("Approve for Circle TokenMessengerV2 ", { code: TOKEN_MESSENGER_V2 }, ", sent with depositForBurn. " +
       `You sign the mint on ${CHAINS[r.dst.chainId].name} yourself` +
-      (r.src.chainId === 5042 ? ". 1 USDC always stays on Arc for gas." : ` (needs a little ${CHAINS[r.dst.chainId].native} for gas).`));
+      (gas ? `. ${gas}` : ` (needs a little ${CHAINS[r.dst.chainId].native} for gas).`));
   } else {
     line("Approve for Circle TokenManager ", { code: r.tokenManager }, ", sent with CrossChainTokenService ", { code: CCTS },
       `. Any fee is paid in ${CHAINS[r.src.chainId].native} on ${CHAINS[r.src.chainId].name}.`);
   }
-  $("fast").checked = r.defaultFast;
-  $("selfMint").checked = r.defaultSelfMint;
+  const mode = transferMode(r, { fast: r.defaultFast, selfMint: r.defaultSelfMint });
+  $("fast").checked = mode.fast;
+  $("selfMint").checked = mode.selfMint;
   $("sym").textContent = r.symbol;
-  quote = null; quotedFor = null;
+  pending = null;
   for (const id of ["wrap", "quote", "approve", "send", "resume"]) setBtn(id, false);
   $("acct").textContent = "";
   $("amt").value = "";
   applyButtons();
 }
 $("route").onchange = () => { if (!busy) showRoute(); };
-renderBook(); renderRecipients(); showRoute();
+fillRoutes(); renderBook(); renderRecipients(); showRoute();
 
 function amountUnits() {
   return ethers.parseUnits(($("amt").value || "0").trim(), route().decimals);
@@ -264,11 +213,8 @@ async function refreshBalances() {
   return bal;
 }
 
-async function checkArcReserve(r, amount) {
-  if (!usdcReserve(r) || r.kind !== "usdc") return;
-  const bal = await new ethers.Contract(r.src.token, ERC20, provider).balanceOf(me);
-  if (bal < amount) throw new Error("Not enough USDC.");
-  if (bal - amount < USDC_GAS_RESERVE / 2n) throw new Error("Keep at least 0.5 USDC on Arc for gas (USDC is the gas token there).");
+async function tokenBalance(token) {
+  return new ethers.Contract(token, ERC20, provider).balanceOf(me);
 }
 
 // ---------------------------------------------------------------- actions
@@ -291,7 +237,7 @@ onClick("connect", async () => {
   }
   renderRecipients();
   const bal = await refreshBalances();
-  const reserve = r.kind === "usdc" ? usdcReserve(r) : 0n;
+  const reserve = maxFillReserve(r);
   $("amt").value = ethers.formatUnits(bal > reserve ? bal - reserve : 0n, r.decimals);
   setBtn("quote", true); setBtn("resume", true); setBtn("wrap", !!r.canWrap);
   setBtn("approve", false); setBtn("send", false);
@@ -302,23 +248,21 @@ onClick("max", async () => {
   if (!me || !provider) throw new Error("Click 1. Connect wallet first.");
   const r = route();
   await ensureChain(r.src.chainId);
-  const bal = await new ethers.Contract(r.src.token, ERC20, provider).balanceOf(me);
+  const bal = await tokenBalance(r.src.token);
   if (bal === 0n && r.canWrap) {
-    // nothing wrapped yet: offer ETH minus a gas reserve
-    const reserve = ethers.parseEther("0.012");
+    // nothing wrapped yet: offer the native gas token minus a gas reserve
+    const native = CHAINS[r.src.chainId].native;
     const eth = await provider.getBalance(me);
-    const v = eth > reserve ? eth - reserve : 0n;
+    const v = eth > WRAP_MAX_RESERVE ? eth - WRAP_MAX_RESERVE : 0n;
     $("amt").value = ethers.formatEther(v);
-    log(`MAX: ${ethers.formatEther(v)} ETH to wrap (0.012 ETH stays for gas).`);
-  } else if (r.kind === "usdc") {
-    const reserve = usdcReserve(r);
-    const v = bal > reserve ? bal - reserve : 0n;
-    $("amt").value = ethers.formatUnits(v, r.decimals);
-    log(`MAX: ${ethers.formatUnits(v, r.decimals)} USDC` + (reserve ? " (1 USDC stays on Arc for gas)." : "."));
-  } else {
-    $("amt").value = ethers.formatUnits(bal, r.decimals);
-    log(`MAX: ${ethers.formatUnits(bal, r.decimals)} ${r.symbol}.`);
+    log(`MAX: ${ethers.formatEther(v)} ${native} to wrap (${ethers.formatEther(WRAP_MAX_RESERVE)} ${native} stays for gas).`);
+    return;
   }
+  const reserve = maxFillReserve(r);
+  const v = bal > reserve ? bal - reserve : 0n;
+  const shown = ethers.formatUnits(v, r.decimals);
+  $("amt").value = shown;
+  log(`MAX: ${shown} ${r.symbol}${maxFillSuffix(r)}.`);
 });
 
 onClick("wrap", async () => {
@@ -328,7 +272,9 @@ onClick("wrap", async () => {
   const amount = amountUnits();
   if (amount <= 0n) throw new Error("Enter the amount of ETH to wrap.");
   const eth = await provider.getBalance(me);
-  if (eth - amount < ethers.parseEther("0.005")) throw new Error("Keep at least 0.005 ETH for gas.");
+  const native = CHAINS[r.src.chainId].native;
+  if (eth - amount < WRAP_MIN_LEFT)
+    throw new Error(`Keep at least ${ethers.formatEther(WRAP_MIN_LEFT)} ${native} for gas.`);
   const weth = new ethers.Contract(r.src.token, ["function deposit() payable"], signer);
   const tx = await weth.deposit({ value: amount });
   log("Wrap sent: " + CHAINS[r.src.chainId].explorer + tx.hash);
@@ -342,35 +288,27 @@ onClick("quote", async () => {
   await ensureChain(r.src.chainId);
   const amount = amountUnits();
   const to = recipient();
-  const fast = $("fast").checked;
-  const selfMint = $("selfMint").checked;
+  const toMode = quoteSelection(r, amount, to);
+  const { fast, selfMint } = toMode;
   if (amount <= 0n) throw new Error("Enter an amount.");
   setBtn("approve", false); setBtn("send", false);
+  const why = spendError(r, amount, await tokenBalance(r.src.token));
+  if (why) throw new Error(why);
+  let nextQuote;
   if (r.kind === "usdc") {
-    await checkArcReserve(r, amount);
-    const bal = await new ethers.Contract(r.src.token, ERC20, provider).balanceOf(me);
-    if (bal < amount) throw new Error("Not enough USDC.");
     const fr = await fetch(`${IRIS}/v2/burn/USDC/fees/${r.src.domain}/${r.dst.domain}`);
     if (!fr.ok) throw new Error(await fr.text());
     const tiers = await fr.json();
-    const tier = Array.isArray(tiers) && tiers.find((t) => t.finalityThreshold === (fast ? 1000 : 2000));
+    const tier = Array.isArray(tiers) && tiers.find((t) => t.finalityThreshold === finality(fast));
     if (!tier) throw new Error("Circle returned no fee for this transfer type.");
-    const feeBps = Number(tier.minimumFee);           // in basis points, can be fractional
-    if (!Number.isFinite(feeBps) || feeBps < 0 || feeBps > MAX_USDC_FEE_BPS)
-      throw new Error(`Circle's fee looks wrong (${tier.minimumFee} bps). Refusing to send.`);
-    const hundredths = BigInt(Math.ceil(feeBps * 100));
-    // fast transfer: 2x headroom so a small fee change does not fall back to standard finality
-    const maxFee = ((amount * hundredths + 999999n) / 1000000n) * (fast ? 2n : 1n);
-    quote = { usdc: true, maxFee };
-    quotedFor = { key: $("route").value, amount, to: to.address, fast, selfMint: true };
+    const maxFee = usdcMaxFee(amount, tier.minimumFee, fast);
+    nextQuote = { maxFee };
     log(`Circle fee: at most ${ethers.formatUnits(maxFee, 6)} USDC (${fast ? "fast" : "standard"}, you sign the mint on ${CHAINS[r.dst.chainId].name}).`);
   } else {
-    const bal = await new ethers.Contract(r.src.token, ERC20, provider).balanceOf(me);
-    if (bal < amount) throw new Error(`Not enough ${r.symbol}.`);
-    quote = await fetchCctpxQuote(r, amount, to.address, fast, selfMint);
-    quotedFor = { key: $("route").value, amount, to: to.address, fast, selfMint };
-    log(`Fee: ${ethers.formatEther(quote.feeTotalAmount)} ${CHAINS[r.src.chainId].native} (${fast ? "fast" : "standard"}, ${selfMint ? "you sign the mint" : "Circle mints for you"}). Send fetches a fresh quote right before signing.`);
+    nextQuote = await fetchCctpxQuote(r, amount, to.address, fast, selfMint);
+    log(`Fee: ${ethers.formatEther(nextQuote.feeTotalAmount)} ${CHAINS[r.src.chainId].native} (${fast ? "fast" : "standard"}, ${selfMint ? "you sign the mint" : "Circle mints for you"}). Send fetches a fresh quote right before signing.`);
   }
+  pending = { selection: toMode, body: nextQuote };
   log(`Recipient: ${to.address} on ${CHAINS[r.dst.chainId].name}${to.self ? "" : `  ← ${to.label}, a DIFFERENT address than the sender`}`);
   const allowance = await new ethers.Contract(r.src.token, ERC20, provider).allowance(me, r.tokenManager);
   setBtn("approve", allowance < amount);
@@ -382,7 +320,10 @@ onClick("approve", async () => {
   const r = route();
   await ensureChain(r.src.chainId);
   const amount = amountUnits();
-  if (!quotedFor || quotedFor.amount !== amount || quotedFor.key !== $("route").value) throw new Error("Click 2. Get fee for this amount first.");
+  const to = recipient();
+  const selection = quoteSelection(r, amount, to);
+  if (!quoteStillMatches(pending?.selection, selection))
+    throw new Error("Click 2. Get fee for this route, amount, recipient and mode first.");
   const tx = await new ethers.Contract(r.src.token, ERC20, signer).approve(r.tokenManager, amount);
   log("Approve sent: " + CHAINS[r.src.chainId].explorer + tx.hash);
   await tx.wait();
@@ -457,10 +398,15 @@ async function selfMintOnDestination(r, burnHash, resume = false) {
 // Extra confirmation before funds leave for an address other than the connected wallet.
 async function confirmRecipient(r, to) {
   if (to.self) return;
-  let isContract = false;
-  try { isContract = (await new ethers.JsonRpcProvider(CHAINS[r.dst.chainId].rpc).getCode(to.address)) !== "0x"; } catch {}
-  const msg = `Send to "${to.label}"\n${to.address}\non ${CHAINS[r.dst.chainId].name}?\n\nThis is NOT the connected wallet.` +
-    (isContract ? `\n\nThis address is a smart contract on ${CHAINS[r.dst.chainId].name}. Make sure it can hold ${r.symbol}.` : "");
+  const chainName = CHAINS[r.dst.chainId].name;
+  let note = "";
+  try {
+    const code = await new ethers.JsonRpcProvider(CHAINS[r.dst.chainId].rpc).getCode(to.address);
+    if (code !== "0x") note = `\n\nThis address is a smart contract on ${chainName}. Make sure it can hold ${r.symbol}.`;
+  } catch {
+    note = `\n\nCould not check whether this address is a smart contract on ${chainName}. Confirm you control it before sending.`;
+  }
+  const msg = `Send to "${to.label}"\n${to.address}\non ${chainName}?\n\nThis is NOT the connected wallet.` + note;
   if (!window.confirm(msg)) throw new Error("Cancelled.");
 }
 
@@ -469,11 +415,12 @@ onClick("send", async () => {
   await ensureChain(r.src.chainId);
   const amount = amountUnits();
   const to = recipient();
-  const fast = $("fast").checked;
-  const selfMint = $("selfMint").checked;
-  if (!quote || !quotedFor || quotedFor.key !== $("route").value || quotedFor.amount !== amount || quotedFor.to !== to.address || quotedFor.fast !== fast || quotedFor.selfMint !== selfMint)
+  const selection = quoteSelection(r, amount, to);
+  const { fast, selfMint } = selection;
+  if (!quoteStillMatches(pending?.selection, selection))
     throw new Error("Get the fee for this route, amount, recipient and mode first.");
-  await checkArcReserve(r, amount);
+  const why = spendError(r, amount, await tokenBalance(r.src.token));
+  if (why) throw new Error(why);
   await confirmRecipient(r, to);
   if (r.kind !== "usdc") {
     // a quote is only valid for a few blocks, so fetch a fresh one right before signing
@@ -481,14 +428,14 @@ onClick("send", async () => {
     const v = await quoteValidity(fresh);
     if (!v.ok) throw new Error("Circle returned an already expired quote, click Send again.");
     const fee = BigInt(fresh.feeTotalAmount);
-    const maxFee = BigInt(quote.feeTotalAmount) * 3n / 2n + ethers.parseEther("0.0001");
-    if (fee > maxFee) throw new Error(`The fee jumped to ${ethers.formatEther(fee)}. Click 2. Get fee and check it.`);
-    if (fee > FEE_CONFIRM[r.src.chainId] &&
+    if (cctpxFeeJumped(BigInt(pending.body.feeTotalAmount), fee)) throw new Error(`The fee jumped to ${ethers.formatEther(fee)}. Click 2. Get fee and check it.`);
+    if (feeNeedsConfirm(r.src.chainId, fee) &&
         !window.confirm(`Circle's fee for this transfer is ${ethers.formatEther(fee)} ${CHAINS[r.src.chainId].native}. Continue?`))
       throw new Error("Cancelled.");
-    quote = fresh;
+    pending = { selection, body: fresh };
     log(`Fresh quote: ${ethers.formatEther(fee)} ${CHAINS[r.src.chainId].native}, ${v.text}. Sign within ~2 minutes.`);
   }
+  const quoted = pending.body;
   const destToken = new ethers.Contract(r.dst.token, ERC20, new ethers.JsonRpcProvider(CHAINS[r.dst.chainId].rpc));
   const before = await destToken.balanceOf(to.address);
   let tx;
@@ -499,8 +446,8 @@ onClick("send", async () => {
       ethers.zeroPadValue(to.address, 32),   // mintRecipient as bytes32
       r.src.token,
       ethers.ZeroHash,                       // anyone may deliver the message
-      quote.maxFee,
-      fast ? 1000 : 2000,                    // from Arc and Avalanche finality is near-instant anyway
+      quoted.maxFee,
+      finality(fast),                        // from Arc and Avalanche finality is near-instant anyway
     );
   } else {
     const svc = new ethers.Contract(CCTS, SERVICE, signer);
@@ -508,13 +455,13 @@ onClick("send", async () => {
       r.tokenId, amount, r.dst.domain,
       ethers.solidityPacked(["address"], [to.address]),   // raw 20 bytes, not 32
       ethers.ZeroHash,                                     // anyone may deliver the message
-      fast ? 1000 : 2000,
-      { signedQuote: quote.signedQuote, refundAddress: me },
+      finality(fast),
+      { signedQuote: quoted.signedQuote, refundAddress: me },
       false, "0x",
-      { value: BigInt(quote.feeTotalAmount) },
+      { value: BigInt(quoted.feeTotalAmount) },
     );
   }
-  quote = null; quotedFor = null;   // a quote is used only once
+  pending = null;   // a quote is used only once
   setBtn("send", false);
   log("Transfer sent: " + CHAINS[r.src.chainId].explorer + tx.hash);
   log(`Keep this hash. If you close the page, finish the transfer later with it: ${tx.hash}`);
