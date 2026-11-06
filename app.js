@@ -62,6 +62,7 @@ const ROUTES = {
   usdc_av_arc: usdcRoute(43114, 5042, false),
   usdc_av_eth: usdcRoute(43114, 1, false),
   usdc_eth_arc: usdcRoute(1, 5042, true),
+  usdc_eth_av: usdcRoute(1, 43114, true),
   usdc_arc_eth: usdcRoute(5042, 1, false),
   eurc_arc_eth: cctpxRoute(EURC, "EURC", 6, 5042, 1, false),
   cirbtc_eth_arc: cctpxRoute(CIRBTC, "cirBTC", 8, 1, 5042, true),
