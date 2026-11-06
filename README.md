@@ -20,6 +20,7 @@ Background: [How to live off a crypto loan, chapter 2.10](https://liberation.tra
 | USDC: Avalanche → Arc | CCTP V2 | seconds |
 | USDC: Avalanche → Ethereum | CCTP V2 | seconds |
 | USDC: Ethereum → Arc | CCTP V2 | ~15–20 min standard, or seconds with "fast" (small fee) |
+| USDC: Ethereum → Avalanche | CCTP V2 | ~15–20 min standard, or seconds with "fast" (small fee) |
 | USDC: Arc → Ethereum | CCTP V2 | seconds |
 | EURC: Arc → Ethereum | CCTPx | seconds to minutes |
 | cirBTC: Ethereum → Arc | CCTPx | ~15–20 min standard, or faster with "fast" |
